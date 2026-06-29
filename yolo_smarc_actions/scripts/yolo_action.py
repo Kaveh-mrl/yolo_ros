@@ -53,6 +53,10 @@ class YoloActionServer:
         self._node.declare_parameter('camera_frame_id', "evolo/z1_camera_link")
         self.camera_frame_id = self._node.get_parameter('camera_frame_id').value
 
+        # Classes to detect at startup.
+        self._node.declare_parameter('startup_classes', [""])
+        self._startup_classes = [c for c in self._node.get_parameter('startup_classes').value if c]
+
         # --- Target-selection state ---
         #   MANUAL : _manual_id is set -> follow EXACTLY that track id. If it is
         #            lost we wait for it indefinitely and NEVER fall back to
@@ -94,6 +98,12 @@ class YoloActionServer:
         #Futures for keeping track of service calls
         self.set_classes_future = None
         self.set_threshold_future = None
+
+        # Push startup classes
+        if self._startup_classes:
+            self.set_classes_request = SetClasses.Request()
+            self.set_classes_request.classes = self._startup_classes
+            self._node.get_logger().info(f"Queued startup classes: {self._startup_classes}")
 
 
         self._classes_as = GentlerActionServer(
