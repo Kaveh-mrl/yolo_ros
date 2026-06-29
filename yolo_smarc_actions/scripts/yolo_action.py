@@ -49,19 +49,25 @@ class YoloActionServer:
         self._node.declare_parameter('lock_timeout', 3.0)
         self._lock_timeout = self._node.get_parameter('lock_timeout').get_parameter_value().double_value
 
-        self._node.declare_parameter('camera_aperture', 50.0)
+        self._node.declare_parameter('camera_aperture', 57.1)
         self.camera_aperture = self._node.get_parameter('camera_aperture').get_parameter_value().double_value
 
         self._node.declare_parameter('camera_frame_id', "evolo/z1_camera_link")
         self.camera_frame_id = self._node.get_parameter('camera_frame_id').value
 
-        # --- Target-selection state (lock / timeout / re-acquire) ---
-        # _locked_id : track id we are currently committed to (str), or None for
-        #              "auto" — re-acquire the highest-confidence track.
-        # _last_seen : node-clock time (s) the locked id was last visible; drives
+        # --- Target-selection state ---
+        # Two modes, chosen by _on_goal_received_tracking:
+        #   MANUAL : _manual_id is set -> follow EXACTLY that track id. If it is
+        #            lost we wait for it indefinitely and NEVER fall back to
+        #            another object. Only an explicit AUTO / -1 request leaves
+        #            this mode.
+        #   AUTO   : _manual_id is None (default) -> acquire the highest-confidence
+        #            track, lock onto it, and on loss > lock_timeout re-acquire
+        #            the next highest.
+        # _locked_id : the auto-mode lock (str), or None to (re)acquire highest.
+        # _last_seen : node-clock time (s) the auto lock was last visible; drives
         #              the lock_timeout grace window in _select_target().
-        # A new MQTT request (_on_goal_received_tracking) overrides _locked_id
-        # immediately and resets _last_seen.
+        self._manual_id: str | None = None
         self._locked_id: str | None = None
         self._last_seen: float = 0.0
 
@@ -245,20 +251,21 @@ class YoloActionServer:
 
     def _select_target(self, detections):
         """
-        Decide which single detection to follow, applying the lock policy.
+        Decide which single detection to follow.
 
-        Policy (identical for MQTT-pinned and auto-acquired locks):
-          1. If a track id is locked and still visible this frame -> keep it.
-          2. If the locked id is missing but was seen < lock_timeout seconds
-             ago -> hold the lock and return None (coast through brief losses,
-             occlusions, or dropped frames).
-          3. If the locked id has been gone longer than lock_timeout -> release
-             the lock and re-acquire.
-          4. With no lock, acquire the highest-confidence committed track.
+        MANUAL mode (_manual_id is set, from an explicit MQTT id):
+          Follow EXACTLY that track id. While it is visible we track it; while
+          it is lost we return None and keep waiting — indefinitely. We never
+          fall back to another object. Only an AUTO / -1 request leaves manual
+          mode.
 
-        A specific id is injected via _on_goal_received_tracking (from MQTT),
-        which seeds _locked_id + _last_seen so this very same machinery then
-        governs how long we wait for it before falling back to auto.
+        AUTO mode (_manual_id is None, the default):
+          1. If the locked id is visible this frame -> keep it.
+          2. If it is missing but was seen < lock_timeout seconds ago -> hold the
+             lock and return None (coast through brief losses / occlusions).
+          3. If it has been gone longer than lock_timeout -> release and
+             re-acquire the highest-confidence track.
+          4. With no lock, acquire the highest-confidence track.
 
         Only detections with a non-empty id are considered: an empty id means
         the tracker has not committed to the box yet (possible one-shot false
@@ -269,7 +276,16 @@ class YoloActionServer:
         # Committed tracks only.
         candidates = [d for d in detections if d.id != ""]
 
-        # --- Follow the currently locked id, if any ---
+        # --- MANUAL mode: follow exactly the requested id, indefinitely ---
+        if self._manual_id is not None:
+            for det in candidates:
+                if det.id == self._manual_id:
+                    self._last_seen = now
+                    return det
+            # Requested id not visible this frame — wait for it; never auto-switch.
+            return None
+
+        # --- AUTO mode: follow the currently locked id, if any ---
         if self._locked_id is not None:
             for det in candidates:
                 if det.id == self._locked_id:
@@ -338,30 +354,37 @@ class YoloActionServer:
         Choose which tracked object the whole pipeline follows.
 
         goal_request:
-          {"id": 5}        -> lock onto and follow track id 5
-          {"id": "AUTO"}   -> automatic mode (highest-confidence track)
-          {"id": -1}       -> same as AUTO (convenience for numeric senders)
+          {"id": 5}        -> MANUAL: lock onto track id 5 and follow it
+                              exclusively. If lost, wait for it indefinitely;
+                              never fall back to another object.
+          {"id": "AUTO"}   -> AUTO: highest-confidence track, with lock + timeout
+                              + re-acquire (the default mode).
+          {"id": -1}       -> same as AUTO (convenience for numeric senders).
 
-        A new id overrides any current lock immediately and resets the
-        loss-timeout grace window. The actual lock / timeout / re-acquire
-        policy lives in _select_target(); here we only record the request.
+        A new request takes effect immediately. The follow policy itself lives
+        in _select_target(); here we only record mode + id.
         """
         self._node.get_logger().info(f"Received new tracking request: {goal_request}")
         try:
             val = goal_request["id"]
 
-            # AUTO / negative -> release any lock and re-acquire highest conf.
+            # AUTO / negative -> leave manual mode; re-acquire highest conf.
             is_auto = (isinstance(val, str) and val.strip().upper() == "AUTO") or \
                       (isinstance(val, (int, float)) and int(val) < 0)
             if is_auto:
+                self._manual_id = None
                 self._locked_id = None
                 self._node.get_logger().info("Tracking mode: AUTO (highest confidence).")
             else:
-                # Detection ids are published as str(int(...)) by tracking_node,
-                # so normalise to that form for comparison in _select_target().
-                self._locked_id = str(int(val))
+                # MANUAL lock. Detection ids are published as str(int(...)) by
+                # tracking_node, so normalise to that form for comparison.
+                self._manual_id = str(int(val))
+                self._locked_id = None          # auto-lock state unused in manual mode
                 self._last_seen = self._now_s()
-                self._node.get_logger().info(f"Tracking locked to id '{self._locked_id}'.")
+                self._node.get_logger().info(
+                    f"Tracking MANUALLY locked to id '{self._manual_id}' "
+                    f"(will wait for it; no auto-fallback)."
+                )
             return True
         except (KeyError, TypeError) as e:
             self._node.get_logger().info(f"Missing/invalid 'id' in tracking request: {e}")
