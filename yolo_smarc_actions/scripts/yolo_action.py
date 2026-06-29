@@ -36,16 +36,14 @@ class YoloActionServer:
         self._node.declare_parameter('image_poi_output', "/yolo/tracked_poi")
         image_poi_output = self._node.get_parameter('image_poi_output').value
 
-        # Single-target output. yolo_action is the ONE place that decides which
+        # Single-target output. yolo_action is the place that decides which
         # tracked object to follow; it republishes that choice here so every
         # downstream consumer (gimbal + vehicle backend) agrees on the same id
-        # instead of each running its own highest-confidence selection.
         self._node.declare_parameter('target_output', "/yolo/target")
         target_output = self._node.get_parameter('target_output').value
 
         # How long (seconds) a locked id may be absent before we release it and
-        # re-acquire. Bridges brief occlusions / dropped detections so the lock
-        # survives a few lost frames, per the tracking spec.
+        # re-acquire.
         self._node.declare_parameter('lock_timeout', 3.0)
         self._lock_timeout = self._node.get_parameter('lock_timeout').get_parameter_value().double_value
 
@@ -56,7 +54,6 @@ class YoloActionServer:
         self.camera_frame_id = self._node.get_parameter('camera_frame_id').value
 
         # --- Target-selection state ---
-        # Two modes, chosen by _on_goal_received_tracking:
         #   MANUAL : _manual_id is set -> follow EXACTLY that track id. If it is
         #            lost we wait for it indefinitely and NEVER fall back to
         #            another object. Only an explicit AUTO / -1 request leaves
@@ -65,8 +62,6 @@ class YoloActionServer:
         #            track, lock onto it, and on loss > lock_timeout re-acquire
         #            the next highest.
         # _locked_id : the auto-mode lock (str), or None to (re)acquire highest.
-        # _last_seen : node-clock time (s) the auto lock was last visible; drives
-        #              the lock_timeout grace window in _select_target().
         self._manual_id: str | None = None
         self._locked_id: str | None = None
         self._last_seen: float = 0.0
@@ -125,8 +120,6 @@ class YoloActionServer:
             loop_frequency = 1.0
         )
 
-        # MQTT-reachable: selects which tracked object the whole pipeline follows.
-        # Now wired to the real handler (was a no-op warning lambda before).
         self._tracking_as = GentlerActionServer(
             self._node,
             "yolo_set_tracking",
@@ -190,16 +183,14 @@ class YoloActionServer:
            
     def yolo_tracking_cb(self, msg : DetectionArray):
         """
-        Runs on every /yolo/tracking message (the full, unfiltered detection
-        list with track ids assigned by tracking_node).
+        Runs on every /yolo/tracking message
 
         Two things happen here:
           1. _select_target() applies the lock / timeout / re-acquire policy and
              returns the ONE detection we are currently committed to (or None).
           2. We publish that choice on two topics:
                - /yolo/target       (DetectionArray, 0 or 1 entries) so the
-                 vehicle backend follows the exact same object instead of doing
-                 its own selection.
+                 vehicle backend follows this object.
                - /yolo/tracked_poi  (QuaternionStamped) the camera-frame bearing
                  the gimbal action server turns toward.
         While target is None we publish an EMPTY /yolo/target and no poi, letting
@@ -219,9 +210,7 @@ class YoloActionServer:
         if target is None:
             return
 
-        # (2) Project the chosen bbox centre into a camera-frame bearing for the
-        #     gimbal. Maths unchanged: width-normalised angle-per-pixel.
-        #Mask is the resolution of the image
+        # (2) Project the chosen bbox centre into a camera-frame bearing for the gimbal action server to follow.
         IMAGE_SIZE = (target.mask.width, target.mask.height)
 
         #math
@@ -252,20 +241,6 @@ class YoloActionServer:
     def _select_target(self, detections):
         """
         Decide which single detection to follow.
-
-        MANUAL mode (_manual_id is set, from an explicit MQTT id):
-          Follow EXACTLY that track id. While it is visible we track it; while
-          it is lost we return None and keep waiting — indefinitely. We never
-          fall back to another object. Only an AUTO / -1 request leaves manual
-          mode.
-
-        AUTO mode (_manual_id is None, the default):
-          1. If the locked id is visible this frame -> keep it.
-          2. If it is missing but was seen < lock_timeout seconds ago -> hold the
-             lock and return None (coast through brief losses / occlusions).
-          3. If it has been gone longer than lock_timeout -> release and
-             re-acquire the highest-confidence track.
-          4. With no lock, acquire the highest-confidence track.
 
         Only detections with a non-empty id are considered: an empty id means
         the tracker has not committed to the box yet (possible one-shot false
@@ -360,9 +335,6 @@ class YoloActionServer:
           {"id": "AUTO"}   -> AUTO: highest-confidence track, with lock + timeout
                               + re-acquire (the default mode).
           {"id": -1}       -> same as AUTO (convenience for numeric senders).
-
-        A new request takes effect immediately. The follow policy itself lives
-        in _select_target(); here we only record mode + id.
         """
         self._node.get_logger().info(f"Received new tracking request: {goal_request}")
         try:
