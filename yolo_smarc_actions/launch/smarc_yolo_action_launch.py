@@ -23,7 +23,8 @@ def generate_launch_description():
         namespace=robot_name,
         output="screen",
         parameters=[{
-            "use_sim_time": use_sim_time
+            "use_sim_time": use_sim_time,
+            "startup_classes": ["person", "boat", "buoy"],
         }]
     )
 
