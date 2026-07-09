@@ -17,6 +17,7 @@ find_package(ament_cmake_python REQUIRED)
 # To install python nodes.
 install(PROGRAMS 
   scripts/yolo_action.py
+  scripts/yolo_corners_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
