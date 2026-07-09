@@ -59,8 +59,9 @@ def generate_launch_description():
                 ),
                 launch_arguments={
                     "model": model_path,
-                    "tracker": LaunchConfiguration("tracker", default="bytetrack.yaml"),
                     "device": LaunchConfiguration("device", default="cuda:0"),
+                    "tracker": LaunchConfiguration("tracker", default="bytetrack.yaml"),
+                    "use_tracking": LaunchConfiguration("use_tracking", default="False"),
                     "enable": LaunchConfiguration("enable", default="True"),
                     "threshold": LaunchConfiguration("threshold", default="0.5"),
                     "input_image_topic": LaunchConfiguration(
