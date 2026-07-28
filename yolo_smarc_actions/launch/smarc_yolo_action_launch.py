@@ -14,6 +14,11 @@ def generate_launch_description():
         "use_sim_time", default_value='False', description="Use simulation time.")
     use_sim_time = LaunchConfiguration("use_sim_time")
 
+    image_poi_output_arg = DeclareLaunchArgument(
+        "image_poi_output", default_value="gimbal_camera/tracked_poi_image",
+        description="Topic for the tracked image POI (QuaternionStamped).")
+    image_poi_output = LaunchConfiguration("image_poi_output")
+
 
     # And finally, launch the action server for gimbal control.
     gimbal_action_server_node = Node(
