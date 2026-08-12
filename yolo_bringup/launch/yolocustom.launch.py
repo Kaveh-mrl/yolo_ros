@@ -17,7 +17,7 @@
 import os
 from launch import LaunchDescription
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
@@ -47,8 +47,23 @@ def generate_launch_description():
         ]
     )
 
+    threshold = LaunchConfiguration("threshold", default="0.5")
+
+    input_image_topic = LaunchConfiguration(
+        "input_image_topic",
+        default=[
+            "/",
+            robot_name,
+            "/",
+            Topics.GIMBAL_CAMERA_RAW_TOPIC,
+        ],
+    )
+
     return LaunchDescription(
         [
+            LogInfo(msg=["[yolocustom] model_path = ", model_path]),
+            LogInfo(msg=["[yolocustom] threshold = ", threshold]),
+            LogInfo(msg=["[yolocustom] input_image_topic = ", input_image_topic]),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(
@@ -63,16 +78,8 @@ def generate_launch_description():
                     "tracker": LaunchConfiguration("tracker", default="bytetrack.yaml"),
                     "use_tracking": LaunchConfiguration("use_tracking", default="False"),
                     "enable": LaunchConfiguration("enable", default="True"),
-                    "threshold": LaunchConfiguration("threshold", default="0.5"),
-                    "input_image_topic": LaunchConfiguration(
-                        "input_image_topic",
-                        default=[
-                            "/",
-                            robot_name,
-                            "/",
-                            Topics.GIMBAL_CAMERA_RAW_TOPIC,
-                        ],
-                    ),
+                    "threshold": threshold,
+                    "input_image_topic": input_image_topic,
                     "image_reliability": LaunchConfiguration(
                         "image_reliability", default="1"
                     ),
