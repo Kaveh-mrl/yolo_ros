@@ -21,10 +21,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Detection.msg"
   "msg/DetectionArray.msg"
 
-  "msg/BoundingBox2DWithCorners.msg"
-  "msg/DetectionWithCorners.msg"
-  "msg/DetectionWithCornersArray.msg"
-
   "srv/SetClasses.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
