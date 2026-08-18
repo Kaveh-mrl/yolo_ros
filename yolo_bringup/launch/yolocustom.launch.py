@@ -21,8 +21,11 @@ from launch.actions import IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
+from launch.actions import DeclareLaunchArgument
+from launch_ros.parameter_descriptions import ParameterValue
 
 from dji_msgs.msg import Topics
+from launch_ros.actions import Node
 
 def generate_launch_description():
 
@@ -58,12 +61,29 @@ def generate_launch_description():
             Topics.GIMBAL_CAMERA_RAW_TOPIC,
         ],
     )
+    width = LaunchConfiguration("width")
+    height = LaunchConfiguration("height")
+    max_fps = LaunchConfiguration("max_fps")
 
     return LaunchDescription(
         [
             LogInfo(msg=["[yolocustom] model_path = ", model_path]),
             LogInfo(msg=["[yolocustom] threshold = ", threshold]),
             LogInfo(msg=["[yolocustom] input_image_topic = ", input_image_topic]),
+            DeclareLaunchArgument(
+                "width",
+                default_value="640",
+            ),
+
+            DeclareLaunchArgument(
+                "height",
+                default_value="360",
+            ),
+
+            DeclareLaunchArgument(
+                "max_fps",
+                default_value="10.0",
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(
@@ -91,6 +111,31 @@ def generate_launch_description():
                         ],
                     ),
                 }.items(),
-            )
+            ),
+            Node(
+                package="yolo_smarc_actions",
+                executable="yolo_downsampler.py",
+                name="yolo_downsampler",
+                output="screen",
+                parameters=[
+                    {
+                        "input_topic": [
+                            "/",
+                            robot_name,
+                            "/yolo/dbg_image",
+                        ],
+                        "output_topic": [
+                            "/",
+                            robot_name,
+                            "/yolo/dbg_image_down",
+                        ],
+                        "width": ParameterValue(width, value_type=int),
+                        "height": ParameterValue(height, value_type=int),
+                        "max_fps": ParameterValue(max_fps, value_type=float),
+                        "publish_compressed": False,
+                        "jpeg_quality": 70,
+                    }
+                ],
+            ),
         ]
     )
